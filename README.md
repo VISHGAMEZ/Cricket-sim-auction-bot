@@ -1,79 +1,283 @@
-IPL Discord Auction Bot (Starter)
-A beginner-friendly Discord slash-command bot for running a mock IPL-style player auction.
-Features in this starter version
-Set up franchises and a starting purse
-Add players to a queue
-Bring the next player up for auction
-Let users bid for a franchise
-Sell a player to the highest bidder or mark them unsold
-View team purses, squads and the upcoming queue
-Stores auction data in SQLite, so it survives bot restarts
-All prices are in crore (Cr). The default purse is ₹100 Cr per team; change it with /setup.
-1. Create your Discord bot
-Open https://discord.com/developers/applications.
-Select New Application, give it a name, then open Bot.
-Create/reset the bot token and copy it. Keep it private; never post it on GitHub.
-Under OAuth2 → URL Generator, select scopes bot and applications.commands.
-Select the bot permission Send Messages. Open the generated invite URL and add the bot to your test server.
-You do not need Message Content Intent for this slash-command bot.
-2. Run it locally
-You need Python 3.10 or newer.
+Discord IPL Auction Bot V3
+A modular Discord auction manager built with Python 3.11+, discord.py 2.x, SQLAlchemy async, and SQLite/PostgreSQL. Guild-owned data is keyed by guild_id; the bot does not create Discord servers.
+Release status: This is a deployable starter implementation with the core auction, wallet, pool, team, trade-approval, help/request and global-admin flows. A live Discord deployment is still required to validate permissions, intents, command registration, and Discord UI behavior. See Known limitations before using it for a high-stakes auction.
+Features
+Hybrid prefix/slash commands (c! by default); per-server prefix.
+Per-guild teams, owners/roles, purses, pools, players, tournaments, bids, passes, squad, trades and reports.
+Persistent database records and persistent auction/trade views restored on startup.
+No automatic auction timeout. Pausing preserves the current player, highest bid and passes.
+Team-owner bid/pass checks; minimum bid increments and purse validation.
+Two-side trade approvals and purse payment based on the sending player's stored purchase price.
+Global bot-admin blacklist, server count and status commands.
+SQLite for one bot process; PostgreSQL URL supported for production database hosting.
+Requirements
+Python 3.11 or newer
+Discord application and bot token
+Bot invited with bot and applications.commands scopes
+Intents enabled in Developer Portal: Server Members Intent and Message Content Intent (plus default guilds)
+Local setup
 python -m venv .venv
-Activate the environment:
-Windows: .venv\\Scripts\\activate
-macOS/Linux: source .venv/bin/activate
-Install dependencies:
+# Windows: .venv\\Scripts\\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-Copy .env.example to a new file named .env, then paste your bot token after DISCORD_TOKEN=.
-Start the bot:
+cp .env.example .env
+Edit .env:
+DISCORD_TOKEN=YOUR_REAL_BOT_TOKEN
+BOT_ADMIN_ID=YOUR_DISCORD_USER_ID
+DATABASE_URL=sqlite+aiosqlite:///./auction.db
+DEFAULT_PREFIX=c!
+LOG_LEVEL=INFO
+Never commit .env, database files, or tokens. BOT_ADMIN_ID is a numeric Discord user ID. Start:
 python bot.py
-When it says it logged in and synced commands, try /setup in your Discord server.
-3. Suggested first test
-Run these commands in your server:
-/setup teams: RCB, CSK, MI, KKR purse: 100
-/addplayer name: Virat Kohli role: BAT base_price: 2
-/addplayer name: Jasprit Bumrah role: BOWL base_price: 2
-/next
-/bid team: RCB amount: 5
-/bid team: MI amount: 5.5
-/sold
-/teams
-/squad team: MI
-The /setup, /addplayer, /next, /sold, and /unsold commands require the Discord Manage Server permission. Bidding is open to server members.
-Commands
-Command
-Purpose
-/setup
-Create teams and set purse
-/addplayer
-Add a player to the queue
-/next
-Start the next player
-/bid
-Place a bid for a team
-/sold
-Sell to the current highest bidder
-/unsold
-Mark current player unsold
-/teams
-Show remaining purses
-/squad
-Show a team's purchased players
-/queue
-Show upcoming players
-/auctionstatus
-Show the live player and current bid
-Important notes
-This is an MVP starter, not a production auction platform.
-The auctioneer/admin manually decides when bidding ends by using /sold.
-It currently supports one active auction player per Discord server.
-Team names in /bid and /squad must match the names created in /setup.
-Do not commit .env or your bot token to GitHub. Add .env to .gitignore.
-Roadmap ideas
-Timed bidding and automatic countdown
-Nomination order and player categories
-Retentions and Right to Match (RTM)
-Squad size and overseas-player limits
-Bid increment rules
-   Auction history and downloadable results
-Buttons and live auction embeds
+Slash commands sync globally during startup; Discord may take time to propagate global command updates. During development, use a test application/server and guild-scoped sync if you want instant iteration.
+Docker deployment (PostgreSQL)
+Copy .env.example to .env and set DISCORD_TOKEN, BOT_ADMIN_ID, and a long POSTGRES_PASSWORD (use URL-safe letters/numbers for the compose example).
+Run docker compose up -d --build.
+Check logs with docker compose logs -f bot; stop with docker compose down (the named PostgreSQL volume remains).
+To back up the database: docker compose exec db pg_dump -U auction auction > auction-backup.sql (adjust the user if POSTGRES_USER differs).
+PostgreSQL deployment
+Set e.g.:
+DATABASE_URL=postgresql+asyncpg://auction_user:URL_ENCODED_PASSWORD@db-host:5432/auction
+Create the database and user in your hosting provider first. The application creates its tables on startup. For multi-instance hosting, PostgreSQL is strongly recommended; run one bot process/worker unless you have explicitly coordinated Discord gateway sharding and application-level auction locks. SQL transactions and FOR UPDATE locks are used for critical updates.
+Discord Developer Portal
+Create an application at https://discord.com/developers/applications.
+Add a Bot user and reset/copy the token into the private .env only.
+Under Bot → Privileged Gateway Intents, enable Server Members Intent and Message Content Intent.
+Under OAuth2 → URL Generator, select scopes bot and applications.commands.
+Select permissions: View Channels, Send Messages, Embed Links, Read Message History, Use Application Commands, and Send Messages in Threads if you use threads. Manage Roles is not required by the current bot because it assigns IDs in its own database rather than changing Discord roles.
+Open the generated invite URL and add the bot to your existing server.
+In the server, the actual server owner runs /setmanagerrole or c!setmanagerrole @Role.
+Management creates teams, assigns team owner users/roles, creates pools and imports players.
+Initial configuration examples
+c!setmanagerrole @AuctionManagement
+c!setauctionchannel #auction
+c!addteam "Mumbai Indians" 10000 MI
+c!addteam "Royal Challengers Bengaluru" 10000 RCB
+c!setteamowner 1 @OwnerOne
+c!setteamrole 2 @RCBTeamOwner
+c!createpool "Pool A"
+c!importplayers 1
+c!startauction 1 "IPL Practice Auction 2026"
+For multiword team/player names, quote arguments. Team IDs and pool IDs are shown in command responses or /teams and pool management output. Slash command options are generated by discord.py from the hybrid command signatures.
+Command index
+General
+help — permission-aware help.
+request <category> <description> — DM request to BOT_ADMIN_ID; use | to separate optional extra details.
+teams, players <query>, squad <partial team name>.
+Team and purse management (management role or server owner)
+addteam <name> [purse] [aliases], removeteam <team_id>.
+setpurse <team_id> <amount>, addpurse, subtractpurse.
+setteamrole <team_id> <role>, setteamowner <team_id> <member>.
+addplayer <team_id> <player_name>, removeplayer <team_id> <player_name>, setplayercategory <player_name> <category>.
+wallet / balance; management can pass a team ID.
+Player pools (management)
+createpool <name>, deletepool <pool_id>, addpoolplayer <pool_id> <name>, removepoolplayer <pool_id> <name>.
+viewpool <pool_id>, selectpool <pool_id>, importplayers <pool_id> [newline-separated names].
+players.py contains an editable starter catalogue.
+Auction (management)
+startauction <pool_id> <tournament_name>.
+breakauction <tournament_id>, resumeauction <tournament_id>, nextplayer <tournament_id>.
+sold <tournament_id>, unsold <tournament_id>, endauction <tournament_id>, setbidincrement <amount>.
+unsoldplayers <tournament_id>, reauctionunsold <tournament_id>, auctionreport <tournament_id>.
+Team owners use the persistent BID and PASS buttons. BID opens a modal for amount.
+Trades
+trade <player_name> <destination_team_id> [receive_player_name].
+tradestatus [trade_id].
+Both team owners must approve. For player-for-purse, the receiving team pays the sender's recorded purchase price.
+Bot administrator (BOT_ADMIN_ID only)
+blacklist <server_owner_user_id> [reason], unblacklist <server_owner_user_id>, servercount, botstatus.
+Server owner only
+setmanagerrole <role>, setauctionchannel <text_channel>, setprefix <prefix>.
+Database and backup
+Tables are created automatically by SQLAlchemy at startup. Stop the bot before copying a SQLite database file. Back up PostgreSQL using pg_dump. Guild ID is part of guild-scoped data queries; do not manually remove guild ID filters. For schema changes, back up first and add a versioned migration (Alembic is recommended before production).
+GitHub upload
+git init
+git add .
+git status  # confirm .env and *.db are NOT staged
+git commit -m "Initial IPL Auction Bot V3"
+git branch -M main
+git remote add origin https://github.com/YOUR_ACCOUNT/ipl-auction-bot-v3.git
+git push -u origin main
+Configure environment variables in your host's secret/environment settings; do not upload .env.
+Testing
+pytest -q
+python -m compileall .
+The included automated tests cover basic guild data isolation and per-guild prefixes. Run the manual Discord checklist below on a private test server before production.
+Manual Discord acceptance checklist
+[ ]
+Invite bot with bot + applications.commands; enable member and message-content intents.
+[ ]
+Confirm /teams and c!teams work; configure different prefixes on two test guilds.
+[ ]
+Confirm guild A cannot see or mutate guild B teams, pools, purses or tournaments.
+[ ]
+Verify only the actual server owner can set manager role, auction channel and prefix.
+[ ]
+Verify management and team-owner access with both user assignment and role assignment.
+[ ]
+Verify bids reject under-increment, insufficient-purse, passed-team and duplicate/highest-team bids.
+[ ]
+Verify pass is once per team/player/round and all-team pass finalizes the player.
+[ ]
+Pause, restart the bot, resume; verify same current player, bid and passes.
+[ ]
+Verify manual SOLD/UNSOLD and end-of-auction report.
+[ ]
+Verify player-for-player and player-for-purse trade approvals by two distinct owners.
+[ ]
+Verify rejection, insufficient receiving purse, invalid squad ownership and trade status.
+[ ]
+Verify the blacklisted server owner is blocked across every server they own, while other members cannot remove the blacklist.
+[ ]
+Verify request DM delivery and graceful failure when admin DMs are closed.
+[ ]
+Verify bot status and server count.
+Known limitations / production hardening required
+The unsold queue and reauctionunsold workflow are implemented; reauction creates a new round so previous passes do not carry over.
+Squad multi-match selection is a temporary (120-second) menu and is not restored after a bot restart.
+Team-owner roles authorize every member holding the configured role; if you need exactly one human approver per team, assign setteamowner instead of a shared role.
+The bot posts auction and completion reports to the configured auction channel (or the command channel if no channel is configured). There is no separate report-channel setting.
+Schema creation is automatic, but production schema evolution should be managed with versioned Alembic migrations; create_all does not migrate existing tables.
+The included automated tests cover basic database guild isolation and per-guild prefixes. Full concurrency/race testing, live Discord interactions, restart behavior, and all manual acceptance items have not been executed in this build environment. PostgreSQL is recommended for production concurrency; SQLite is intended for a single bot process.
+Do not treat this ZIP as certified production software until the manual acceptance checklist passes in a private Discord test server and concurrency behavior is validated on your hosting database.Discord IPL Auction Bot V3
+A modular Discord auction manager built with Python 3.11+, discord.py 2.x, SQLAlchemy async, and SQLite/PostgreSQL. Guild-owned data is keyed by guild_id; the bot does not create Discord servers.
+Release status: This is a deployable starter implementation with the core auction, wallet, pool, team, trade-approval, help/request and global-admin flows. A live Discord deployment is still required to validate permissions, intents, command registration, and Discord UI behavior. See Known limitations before using it for a high-stakes auction.
+Features
+Hybrid prefix/slash commands (c! by default); per-server prefix.
+Per-guild teams, owners/roles, purses, pools, players, tournaments, bids, passes, squad, trades and reports.
+Persistent database records and persistent auction/trade views restored on startup.
+No automatic auction timeout. Pausing preserves the current player, highest bid and passes.
+Team-owner bid/pass checks; minimum bid increments and purse validation.
+Two-side trade approvals and purse payment based on the sending player's stored purchase price.
+Global bot-admin blacklist, server count and status commands.
+SQLite for one bot process; PostgreSQL URL supported for production database hosting.
+Requirements
+Python 3.11 or newer
+Discord application and bot token
+Bot invited with bot and applications.commands scopes
+Intents enabled in Developer Portal: Server Members Intent and Message Content Intent (plus default guilds)
+Local setup
+python -m venv .venv
+# Windows: .venv\\Scripts\\activate
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+Edit .env:
+DISCORD_TOKEN=YOUR_REAL_BOT_TOKEN
+BOT_ADMIN_ID=YOUR_DISCORD_USER_ID
+DATABASE_URL=sqlite+aiosqlite:///./auction.db
+DEFAULT_PREFIX=c!
+LOG_LEVEL=INFO
+Never commit .env, database files, or tokens. BOT_ADMIN_ID is a numeric Discord user ID. Start:
+python bot.py
+Slash commands sync globally during startup; Discord may take time to propagate global command updates. During development, use a test application/server and guild-scoped sync if you want instant iteration.
+Docker deployment (PostgreSQL)
+Copy .env.example to .env and set DISCORD_TOKEN, BOT_ADMIN_ID, and a long POSTGRES_PASSWORD (use URL-safe letters/numbers for the compose example).
+Run docker compose up -d --build.
+Check logs with docker compose logs -f bot; stop with docker compose down (the named PostgreSQL volume remains).
+To back up the database: docker compose exec db pg_dump -U auction auction > auction-backup.sql (adjust the user if POSTGRES_USER differs).
+PostgreSQL deployment
+Set e.g.:
+DATABASE_URL=postgresql+asyncpg://auction_user:URL_ENCODED_PASSWORD@db-host:5432/auction
+Create the database and user in your hosting provider first. The application creates its tables on startup. For multi-instance hosting, PostgreSQL is strongly recommended; run one bot process/worker unless you have explicitly coordinated Discord gateway sharding and application-level auction locks. SQL transactions and FOR UPDATE locks are used for critical updates.
+Discord Developer Portal
+Create an application at https://discord.com/developers/applications.
+Add a Bot user and reset/copy the token into the private .env only.
+Under Bot → Privileged Gateway Intents, enable Server Members Intent and Message Content Intent.
+Under OAuth2 → URL Generator, select scopes bot and applications.commands.
+Select permissions: View Channels, Send Messages, Embed Links, Read Message History, Use Application Commands, and Send Messages in Threads if you use threads. Manage Roles is not required by the current bot because it assigns IDs in its own database rather than changing Discord roles.
+Open the generated invite URL and add the bot to your existing server.
+In the server, the actual server owner runs /setmanagerrole or c!setmanagerrole @Role.
+Management creates teams, assigns team owner users/roles, creates pools and imports players.
+Initial configuration examples
+c!setmanagerrole @AuctionManagement
+c!setauctionchannel #auction
+c!addteam "Mumbai Indians" 10000 MI
+c!addteam "Royal Challengers Bengaluru" 10000 RCB
+c!setteamowner 1 @OwnerOne
+c!setteamrole 2 @RCBTeamOwner
+c!createpool "Pool A"
+c!importplayers 1
+c!startauction 1 "IPL Practice Auction 2026"
+For multiword team/player names, quote arguments. Team IDs and pool IDs are shown in command responses or /teams and pool management output. Slash command options are generated by discord.py from the hybrid command signatures.
+Command index
+General
+help — permission-aware help.
+request <category> <description> — DM request to BOT_ADMIN_ID; use | to separate optional extra details.
+teams, players <query>, squad <partial team name>.
+Team and purse management (management role or server owner)
+addteam <name> [purse] [aliases], removeteam <team_id>.
+setpurse <team_id> <amount>, addpurse, subtractpurse.
+setteamrole <team_id> <role>, setteamowner <team_id> <member>.
+addplayer <team_id> <player_name>, removeplayer <team_id> <player_name>, setplayercategory <player_name> <category>.
+wallet / balance; management can pass a team ID.
+Player pools (management)
+createpool <name>, deletepool <pool_id>, addpoolplayer <pool_id> <name>, removepoolplayer <pool_id> <name>.
+viewpool <pool_id>, selectpool <pool_id>, importplayers <pool_id> [newline-separated names].
+players.py contains an editable starter catalogue.
+Auction (management)
+startauction <pool_id> <tournament_name>.
+breakauction <tournament_id>, resumeauction <tournament_id>, nextplayer <tournament_id>.
+sold <tournament_id>, unsold <tournament_id>, endauction <tournament_id>, setbidincrement <amount>.
+unsoldplayers <tournament_id>, reauctionunsold <tournament_id>, auctionreport <tournament_id>.
+Team owners use the persistent BID and PASS buttons. BID opens a modal for amount.
+Trades
+trade <player_name> <destination_team_id> [receive_player_name].
+tradestatus [trade_id].
+Both team owners must approve. For player-for-purse, the receiving team pays the sender's recorded purchase price.
+Bot administrator (BOT_ADMIN_ID only)
+blacklist <server_owner_user_id> [reason], unblacklist <server_owner_user_id>, servercount, botstatus.
+Server owner only
+setmanagerrole <role>, setauctionchannel <text_channel>, setprefix <prefix>.
+Database and backup
+Tables are created automatically by SQLAlchemy at startup. Stop the bot before copying a SQLite database file. Back up PostgreSQL using pg_dump. Guild ID is part of guild-scoped data queries; do not manually remove guild ID filters. For schema changes, back up first and add a versioned migration (Alembic is recommended before production).
+GitHub upload
+git init
+git add .
+git status  # confirm .env and *.db are NOT staged
+git commit -m "Initial IPL Auction Bot V3"
+git branch -M main
+git remote add origin https://github.com/YOUR_ACCOUNT/ipl-auction-bot-v3.git
+git push -u origin main
+Configure environment variables in your host's secret/environment settings; do not upload .env.
+Testing
+pytest -q
+python -m compileall .
+The included automated tests cover basic guild data isolation and per-guild prefixes. Run the manual Discord checklist below on a private test server before production.
+Manual Discord acceptance checklist
+[ ]
+Invite bot with bot + applications.commands; enable member and message-content intents.
+[ ]
+Confirm /teams and c!teams work; configure different prefixes on two test guilds.
+[ ]
+Confirm guild A cannot see or mutate guild B teams, pools, purses or tournaments.
+[ ]
+Verify only the actual server owner can set manager role, auction channel and prefix.
+[ ]
+Verify management and team-owner access with both user assignment and role assignment.
+[ ]
+Verify bids reject under-increment, insufficient-purse, passed-team and duplicate/highest-team bids.
+[ ]
+Verify pass is once per team/player/round and all-team pass finalizes the player.
+[ ]
+Pause, restart the bot, resume; verify same current player, bid and passes.
+[ ]
+Verify manual SOLD/UNSOLD and end-of-auction report.
+[ ]
+Verify player-for-player and player-for-purse trade approvals by two distinct owners.
+[ ]
+Verify rejection, insufficient receiving purse, invalid squad ownership and trade status.
+[ ]
+Verify the blacklisted server owner is blocked across every server they own, while other members cannot remove the blacklist.
+[ ]
+Verify request DM delivery and graceful failure when admin DMs are closed.
+[ ]
+Verify bot status and server count.
+Known limitations / production hardening required
+The unsold queue and reauctionunsold workflow are implemented; reauction creates a new round so previous passes do not carry over.
+Squad multi-match selection is a temporary (120-second) menu and is not restored after a bot restart.
+Team-owner roles authorize every member holding the configured role; if you need exactly one human approver per team, assign setteamowner instead of a shared role.
+The bot posts auction and completion reports to the configured auction channel (or the command channel if no channel is configured). There is no separate report-channel setting.
+Schema creation is automatic, but production schema evolution should be managed with versioned Alembic migrations; create_all does not migrate existing tables.
+The included automated tests cover basic database guild isolation and per-guild prefixes. Full concurrency/race testing, live Discord interactions, restart behavior, and all manual acceptance items have not been executed in this build environment. PostgreSQL is recommended for production concurrency; SQLite is intended for a single bot process.
+Do not treat this ZIP as certified production software until the manual acceptance checklist passes in a private Discord test server and concurrency behavior is validated on your hosting database.
