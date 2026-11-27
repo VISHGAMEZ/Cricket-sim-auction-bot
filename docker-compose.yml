@@ -1,0 +1,8 @@
+
+services:
+  ipl-auction-bot:
+    build: .
+    container_name: ipl-auction-bot
+    restart: unless-stopped
+    env_file:
+      - .env
